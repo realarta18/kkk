@@ -11,25 +11,36 @@ jobs:
       - name: Configure System Security and RDP
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 1 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 2 -Force
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name "LocalAccountTokenFilterPolicy" -Value 1 -Force
           Set-Service -Name TermService -StartupType Automatic
-          
+          Restart-Service -Name TermService -Force
+
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
           netsh advfirewall firewall add rule name="RDP-Inbound-3389" dir=in action=allow protocol=TCP localport=3389
 
       - name: Setup Administrator Account
         run: |
-          $Password = "Admin2026@SecurePass"
           $Username = "Administrator"
+          $Password = "SecureAdmin@2026!"
           $SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
-          
-          Enable-LocalUser -Name $Username -ErrorAction SilentlyContinue
-          Set-LocalUser -Name $Username -Password $SecurePassword -AccountNeverExpires:$true -ErrorAction SilentlyContinue
+
+          $existingUser = Get-LocalUser -Name $Username -ErrorAction SilentlyContinue
+          if (-not $existingUser) {
+              New-LocalUser -Name $Username -Password $SecurePassword -FullName "Administrator" -Description "Primary Administrator Account" -PasswordNeverExpires -AccountNeverExpires
+          } else {
+              Set-LocalUser -Name $Username -Password $SecurePassword -PasswordNeverExpires $true -AccountNeverExpires
+          }
+
+          Enable-LocalUser -Name $Username
           Add-LocalGroupMember -Group "Administrators" -Member $Username -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $Username -ErrorAction SilentlyContinue
-          
+
+          $obj = [ADSI]"WinNT://./$Username,user"
+          $obj.UserFlags.value = $obj.UserFlags.value -bor 0x10000
+          $obj.SetInfo()
+
           "RDP_USER=$Username" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "RDP_PASS=$Password" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
@@ -53,7 +64,7 @@ jobs:
           )
           foreach ($path in $IconPaths) {
               if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }
-              Set-ItemProperty -Path $path -Name "{20D04FE0-3AEA-1069-A2D8-08002B30309D}" -Value 0 -Force
+              Set-ItemProperty -Path $path -Name "{20D04FE0-3AEA-1069-A2D8-08002B30309D}" -Value 1 -Force
           }
 
           $List = Get-WinUserLanguageList
@@ -96,16 +107,17 @@ jobs:
           $3xUiUrl = "https://github.com/MHSanaei/3x-ui/releases/download/v3.6.0/x-ui-windows-amd64.zip"
           $ZipPath = "$env:TEMP\3x-ui.zip"
           $ExtractPath = "C:\3x-ui"
-          
+
           Invoke-WebRequest -Uri $3xUiUrl -OutFile $ZipPath
           Expand-Archive -Path $ZipPath -DestinationPath $ExtractPath -Force
           Remove-Item -Path $ZipPath -Force -ErrorAction SilentlyContinue
-          
+
           if (Test-Path "$ExtractPath\x-ui.exe") {
               $action = New-ScheduledTaskAction -Execute "$ExtractPath\x-ui.exe" -WorkingDirectory $ExtractPath
               $trigger = New-ScheduledTaskTrigger -AtStartup
+              $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
               $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-              Register-ScheduledTask -TaskName "3x-ui-Service" -Action $action -Trigger $trigger -Principal $principal -Force
+              Register-ScheduledTask -TaskName "3x-ui-Service" -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force
               Start-ScheduledTask -TaskName "3x-ui-Service" -ErrorAction SilentlyContinue
           }
 
@@ -113,19 +125,19 @@ jobs:
         run: |
           $TsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $Installer = "$env:TEMP\tailscale.msi"
-          
+
           Invoke-WebRequest -Uri $TsUrl -OutFile $Installer
           Start-Process msiexec.exe -ArgumentList "/i", $Installer, "/quiet", "/norestart" -Wait
           Remove-Item -Path $Installer -Force -ErrorAction SilentlyContinue
-          
+
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=win-server-$env:GITHUB_RUN_ID
-          
+
           $TsIP = $null
           for ($i = 0; $i -lt 12 -and -not $TsIP; $i++) {
               Start-Sleep -Seconds 5
               $TsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           }
-          
+
           if ($TsIP) {
               "TAILSCALE_IP=$TsIP" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
@@ -141,7 +153,7 @@ jobs:
           Write-Host " Username     : $env:RDP_USER"
           Write-Host " Password     : $env:RDP_PASS"
           Write-Host "=================================================="
-          
+
           while ($true) {
               Start-Sleep -Seconds 3600
           }
