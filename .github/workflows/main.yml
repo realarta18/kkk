@@ -14,22 +14,21 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
           Set-Service -Name TermService -StartupType Automatic
-          Restart-Service -Name TermService -Force
-
-          netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
+          
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
           netsh advfirewall firewall add rule name="RDP-Inbound-3389" dir=in action=allow protocol=TCP localport=3389
 
       - name: Setup Administrator Account
         run: |
-          $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@"
-          $bytes = New-Object byte[] 12
-          (New-Object System.Security.Cryptography.RNGCryptoServiceProvider).GetBytes($bytes)
-          $Password = "P@ss123" + (-join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] }))
+          $RandomNum = Get-Random -Minimum 100000 -Maximum 999999
+          $Password = "AdminPass2026!$RandomNum"
           $Username = "Administrator"
+          $SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
           
-          net user $Username "$Password" /active:yes
-          wmic useraccount where name="$Username" set passwordexpires=false
-          net localgroup "Remote Desktop Users" $Username /add
+          Enable-LocalUser -Name $Username -ErrorAction SilentlyContinue
+          Set-LocalUser -Name $Username -Password $SecurePassword -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Administrators" -Member $Username -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $Username -ErrorAction SilentlyContinue
           
           "RDP_USER=$Username" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "RDP_PASS=$Password" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -107,7 +106,7 @@ jobs:
               $trigger = New-ScheduledTaskTrigger -AtStartup
               $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
               Register-ScheduledTask -TaskName "3x-ui-Service" -Action $action -Trigger $trigger -Principal $principal -Force
-              Start-ScheduledTask -TaskName "3x-ui-Service"
+              Start-ScheduledTask -TaskName "3x-ui-Service" -ErrorAction SilentlyContinue
           }
 
       - name: Deploy Tailscale Network
