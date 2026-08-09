@@ -78,8 +78,15 @@ jobs:
               Set-WinUserLanguageList -LanguageList $LanguageList -Force
           }
           
-          Import-Module International -ErrorAction SilentlyContinue
-          Copy-UserInternationalSettingsToSystem -SourceUser $env:USERNAME -destinationSystem $true -destinationDefaultUser $true -ErrorAction SilentlyContinue
+          $KeyboardPaths = @(
+              "HKCU:\Keyboard Layout\Preload",
+              "Registry::HKEY_USERS\.DEFAULT\Keyboard Layout\Preload"
+          )
+          foreach ($Path in $KeyboardPaths) {
+              if (-not (Test-Path $Path)) { New-Item -Path $Path -Force | Out-Null }
+              Set-ItemProperty -Path $Path -Name "1" -Value "00000409" -Force
+              Set-ItemProperty -Path $Path -Name "2" -Value "00000429" -Force
+          }
           
           Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
 
