@@ -21,8 +21,10 @@ jobs:
 
       - name: Setup User Account
         run: |
-          $Assembly = Add-Type -AssemblyName System.Web
-          $Password = [System.Web.Security.Membership]::GeneratePassword(16, 4) + "Aa1!"
+          $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%"
+          $bytes = New-Object byte[] 16
+          (New-Object System.Security.Cryptography.RNGCryptoServiceProvider).GetBytes($bytes)
+          $Password = "Sec#" + (-join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })) + "1a"
           $Username = "AdminUser"
           $SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
           
@@ -105,7 +107,6 @@ jobs:
       - name: Verify Infrastructure and Keep Alive
         if: always()
         run: |
-          Clear-Host
           Write-Host "=================================================="
           Write-Host "         SECURE RDP SESSION ESTABLISHED          "
           Write-Host "=================================================="
