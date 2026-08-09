@@ -19,36 +19,52 @@ jobs:
           netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
           netsh advfirewall firewall add rule name="RDP-Inbound-3389" dir=in action=allow protocol=TCP localport=3389
 
-      - name: Setup User Account
+      - name: Setup Administrator Account
         run: |
           $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%"
           $bytes = New-Object byte[] 16
           (New-Object System.Security.Cryptography.RNGCryptoServiceProvider).GetBytes($bytes)
-          $Password = "Sec#" + (-join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })) + "1a"
-          $Username = "AdminUser"
+          $Password = "Admin#" + (-join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })) + "9Z"
+          $Username = "Administrator"
           $SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
           
-          New-LocalUser -Name $Username -Password $SecurePassword -AccountNeverExpires -FullName "System Administrator" -ErrorAction SilentlyContinue
+          Enable-LocalUser -Name $Username -ErrorAction SilentlyContinue
+          Set-LocalUser -Name $Username -Password $SecurePassword -AccountNeverExpires $true -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Administrators" -Member $Username -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $Username -ErrorAction SilentlyContinue
-          
-          Enable-LocalUser -Name $Username
           
           "RDP_USER=$Username" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "RDP_PASS=$Password" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Desktop UI Customization
+      - name: Configure Personalization Dark Theme Desktop and Keyboard
         run: |
-          $Paths = @(
-              "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel",
-              "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\ClassicStartMenu"
+          $ThemePaths = @(
+              "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+              "Registry::HKEY_USERS\.DEFAULT\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
           )
-          foreach ($Path in $Paths) {
-              if (-not (Test-Path $Path)) {
-                  New-Item -Path $Path -Force | Out-Null
-              }
-              Set-ItemProperty -Path $Path -Name "{20D04FE0-3AEA-1069-A2D8-08002B30309D}" -Value 0 -Force
+          foreach ($path in $ThemePaths) {
+              if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }
+              Set-ItemProperty -Path $path -Name "AppsUseLightTheme" -Value 0 -Force
+              Set-ItemProperty -Path $path -Name "SystemUsesLightTheme" -Value 0 -Force
           }
+
+          $IconPaths = @(
+              "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel",
+              "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\ClassicStartMenu",
+              "Registry::HKEY_USERS\.DEFAULT\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel",
+              "Registry::HKEY_USERS\.DEFAULT\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\ClassicStartMenu"
+          )
+          foreach ($path in $IconPaths) {
+              if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }
+              Set-ItemProperty -Path $path -Name "{20D04FE0-3AEA-1069-A2D8-08002B30309D}" -Value 0 -Force
+          }
+
+          $List = Get-WinUserLanguageList
+          if (-not ($List | Where-Object { $_.LanguageTag -match "fa" })) {
+              $List.Add("fa-IR")
+              Set-WinUserLanguageList -LanguageList $List -Force
+          }
+
           Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
 
       - name: Install Brave Browser
@@ -59,17 +75,26 @@ jobs:
           Start-Process -FilePath $Installer -ArgumentList "/silent", "/install" -Wait
           Remove-Item -Path $Installer -Force -ErrorAction SilentlyContinue
 
+      - name: Install Visual Studio Code
+        run: |
+          $VsCodeUrl = "https://update.code.visualstudio.com/latest/win32-x64-user/stable"
+          $Installer = "$env:TEMP\vscode_setup.exe"
+          Invoke-WebRequest -Uri $VsCodeUrl -OutFile $Installer
+          Start-Process -FilePath $Installer -ArgumentList "/verysilent", "/norestart", "/MERGETASKS=!runcode" -Wait
+          Remove-Item -Path $Installer -Force -ErrorAction SilentlyContinue
+
       - name: Install Internet Download Manager
         run: |
           $IdmUrl = "https://mirror2.internetdownloadmanager.com/idman642build25.exe"
           $Installer = "$env:TEMP\idm_setup.exe"
           Invoke-WebRequest -Uri $IdmUrl -OutFile $Installer -UserAgent "Mozilla/5.0"
-          Start-Process -FilePath $Installer -ArgumentList "/s"
-          Start-Sleep -Seconds 20
-          Get-Process -Name "idman*","IEMonitor*","idm_setup*" -ErrorAction SilentlyContinue | Stop-Process -Force
+          $proc = Start-Process -FilePath $Installer -ArgumentList "/s" -PassThru
+          Start-Sleep -Seconds 15
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+          Get-Process -Name "idman*","IEMonitor*" -ErrorAction SilentlyContinue | Stop-Process -Force
           Remove-Item -Path $Installer -Force -ErrorAction SilentlyContinue
 
-      - name: Install and Deploy 3x-ui
+      - name: Install and Register 3x-ui Service
         run: |
           $3xUiUrl = "https://github.com/MHSanaei/3x-ui/releases/download/v3.6.0/x-ui-windows-amd64.zip"
           $ZipPath = "$env:TEMP\3x-ui.zip"
@@ -80,7 +105,11 @@ jobs:
           Remove-Item -Path $ZipPath -Force -ErrorAction SilentlyContinue
           
           if (Test-Path "$ExtractPath\x-ui.exe") {
-              Start-Process -FilePath "$ExtractPath\x-ui.exe" -WorkingDirectory $ExtractPath -WindowStyle Hidden
+              $action = New-ScheduledTaskAction -Execute "$ExtractPath\x-ui.exe" -WorkingDirectory $ExtractPath
+              $trigger = New-ScheduledTaskTrigger -AtStartup
+              $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+              Register-ScheduledTask -TaskName "3x-ui-Service" -Action $action -Trigger $trigger -Principal $principal -Force
+              Start-ScheduledTask -TaskName "3x-ui-Service"
           }
 
       - name: Deploy Tailscale Network
