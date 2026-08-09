@@ -11,8 +11,8 @@ jobs:
       - name: Configure System Security and RDP
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 2 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
           Set-Service -Name TermService -StartupType Automatic
           Restart-Service -Name TermService -Force
 
@@ -21,17 +21,15 @@ jobs:
 
       - name: Setup Administrator Account
         run: |
-          $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%"
-          $bytes = New-Object byte[] 16
+          $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@"
+          $bytes = New-Object byte[] 12
           (New-Object System.Security.Cryptography.RNGCryptoServiceProvider).GetBytes($bytes)
-          $Password = "Admin#" + (-join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })) + "9Z"
+          $Password = "P@ss123" + (-join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] }))
           $Username = "Administrator"
-          $SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
           
-          Enable-LocalUser -Name $Username -ErrorAction SilentlyContinue
-          Set-LocalUser -Name $Username -Password $SecurePassword -AccountNeverExpires:$true -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group "Administrators" -Member $Username -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $Username -ErrorAction SilentlyContinue
+          net user $Username "$Password" /active:yes
+          wmic useraccount where name="$Username" set passwordexpires=false
+          net localgroup "Remote Desktop Users" $Username /add
           
           "RDP_USER=$Username" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "RDP_PASS=$Password" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
