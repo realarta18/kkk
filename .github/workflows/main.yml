@@ -6,7 +6,6 @@ on:
 jobs:
   build-and-run:
     runs-on: windows-latest
-    timeout-minutes: 350
 
     steps:
       - name: Harden System and Enable RDP Access
@@ -197,18 +196,15 @@ jobs:
       - name: Display Access Credentials and Maintain Session
         if: always()
         run: |
-          Write-Host ""
           Write-Host "=================================================="
-          Write-Host "           SECURE RDP SESSION READY"
+          Write-Host "         SECURE RDP SESSION ESTABLISHED          "
           Write-Host "=================================================="
-          Write-Host "Tailscale IP : $env:TAILSCALE_IP"
-          Write-Host "RDP Port     : 3389"
-          Write-Host "Username     : $env:RDP_USER"
-          Write-Host "Password     : $env:RDP_PASS"
+          Write-Host " Tailscale IP : $env:TAILSCALE_IP"
+          Write-Host " RDP Port     : 3389"
+          Write-Host " Username     : $env:RDP_USER"
+          Write-Host " Password     : $env:RDP_PASS"
           Write-Host "=================================================="
-          Write-Host ""
           
           while ($true) {
-              Start-Sleep -Seconds 600
-              Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Session active"
+              Start-Sleep -Seconds 3600
           }
