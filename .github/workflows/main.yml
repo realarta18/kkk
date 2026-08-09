@@ -51,21 +51,9 @@ jobs:
           }
           Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
 
-      - name: Install Brave Browser
+      - name: Install Software Package
         run: |
-          $BraveUrl = "https://laptop-updates.brave.com/latest/winx64"
-          $Installer = "$env:TEMP\BraveSetup.exe"
-          Invoke-WebRequest -Uri $BraveUrl -OutFile $Installer
-          Start-Process -FilePath $Installer -ArgumentList "/silent", "/install" -Wait
-          Remove-Item -Path $Installer -Force
-
-      - name: Install Internet Download Manager
-        run: |
-          $IdmUrl = "https://mirror2.internetdownloadmanager.com/idman642build25.exe"
-          $Installer = "$env:TEMP\idm_setup.exe"
-          Invoke-WebRequest -Uri $IdmUrl -OutFile $Installer -UserAgent "Mozilla/5.0"
-          Start-Process -FilePath $Installer -ArgumentList "/s" -Wait
-          Remove-Item -Path $Installer -Force
+          choco install brave internetdownloadmanager -y --no-progress
 
       - name: Install and Deploy 3x-ui
         run: |
