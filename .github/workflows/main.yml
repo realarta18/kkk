@@ -79,7 +79,7 @@ jobs:
           }
           
           Import-Module International -ErrorAction SilentlyContinue
-          Copy-UserInternationalSettingsToSystem -SourceUser $env:USERNAME -destination:AllUsers -ErrorAction SilentlyContinue
+          Copy-UserInternationalSettingsToSystem -SourceUser $env:USERNAME -destinationSystem $true -destinationDefaultUser $true -ErrorAction SilentlyContinue
           
           Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
 
