@@ -29,7 +29,7 @@ jobs:
           $SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
           
           Enable-LocalUser -Name $Username -ErrorAction SilentlyContinue
-          Set-LocalUser -Name $Username -Password $SecurePassword -AccountNeverExpires $true -ErrorAction SilentlyContinue
+          Set-LocalUser -Name $Username -Password $SecurePassword -AccountNeverExpires:$true -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Administrators" -Member $Username -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $Username -ErrorAction SilentlyContinue
           
