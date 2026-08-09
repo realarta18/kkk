@@ -51,9 +51,23 @@ jobs:
           }
           Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
 
-      - name: Install Software Package
+      - name: Install Brave Browser
         run: |
-          choco install brave internetdownloadmanager -y --no-progress
+          $BraveUrl = "https://laptop-updates.brave.com/latest/winx64"
+          $Installer = "$env:TEMP\BraveSetup.exe"
+          Invoke-WebRequest -Uri $BraveUrl -OutFile $Installer
+          Start-Process -FilePath $Installer -ArgumentList "/silent", "/install" -Wait
+          Remove-Item -Path $Installer -Force -ErrorAction SilentlyContinue
+
+      - name: Install Internet Download Manager
+        run: |
+          $IdmUrl = "https://mirror2.internetdownloadmanager.com/idman642build25.exe"
+          $Installer = "$env:TEMP\idm_setup.exe"
+          Invoke-WebRequest -Uri $IdmUrl -OutFile $Installer -UserAgent "Mozilla/5.0"
+          Start-Process -FilePath $Installer -ArgumentList "/s"
+          Start-Sleep -Seconds 20
+          Get-Process -Name "idman*","IEMonitor*","idm_setup*" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Remove-Item -Path $Installer -Force -ErrorAction SilentlyContinue
 
       - name: Install and Deploy 3x-ui
         run: |
@@ -63,7 +77,7 @@ jobs:
           
           Invoke-WebRequest -Uri $3xUiUrl -OutFile $ZipPath
           Expand-Archive -Path $ZipPath -DestinationPath $ExtractPath -Force
-          Remove-Item -Path $ZipPath -Force
+          Remove-Item -Path $ZipPath -Force -ErrorAction SilentlyContinue
           
           if (Test-Path "$ExtractPath\x-ui.exe") {
               Start-Process -FilePath "$ExtractPath\x-ui.exe" -WorkingDirectory $ExtractPath -WindowStyle Hidden
@@ -76,7 +90,7 @@ jobs:
           
           Invoke-WebRequest -Uri $TsUrl -OutFile $Installer
           Start-Process msiexec.exe -ArgumentList "/i", $Installer, "/quiet", "/norestart" -Wait
-          Remove-Item -Path $Installer -Force
+          Remove-Item -Path $Installer -Force -ErrorAction SilentlyContinue
           
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=win-server-$env:GITHUB_RUN_ID
           
@@ -86,11 +100,9 @@ jobs:
               $TsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           }
           
-          if (-not $TsIP) {
-              exit 1
+          if ($TsIP) {
+              "TAILSCALE_IP=$TsIP" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
-          
-          "TAILSCALE_IP=$TsIP" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Verify Infrastructure and Keep Alive
         if: always()
