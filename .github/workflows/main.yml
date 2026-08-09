@@ -1,0 +1,120 @@
+name: Secure Windows Environment RDP
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-run:
+    runs-on: windows-latest
+
+    steps:
+      - name: Configure System Security and RDP
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 2 -Force
+          Set-Service -Name TermService -StartupType Automatic
+          Restart-Service -Name TermService -Force
+
+          netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
+          netsh advfirewall firewall add rule name="RDP-Inbound-3389" dir=in action=allow protocol=TCP localport=3389
+
+      - name: Setup User Account
+        run: |
+          $Assembly = Add-Type -AssemblyName System.Web
+          $Password = [System.Web.Security.Membership]::GeneratePassword(16, 4) + "Aa1!"
+          $Username = "AdminUser"
+          $SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+          
+          New-LocalUser -Name $Username -Password $SecurePassword -AccountNeverExpires -CannotChangePassword -FullName "System Administrator" -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Administrators" -Member $Username -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $Username -ErrorAction SilentlyContinue
+          
+          Enable-LocalUser -Name $Username
+          
+          echo "RDP_USER=$Username" >> $env:GITHUB_ENV
+          echo "RDP_PASS=$Password" >> $env:GITHUB_ENV
+
+      - name: Desktop UI Customization
+        run: |
+          $Paths = @(
+              "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel",
+              "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\ClassicStartMenu"
+          )
+          foreach ($Path in $Paths) {
+              if (-not (Test-Path $Path)) {
+                  New-Item -Path $Path -Force | Out-Null
+              }
+              Set-ItemProperty -Path $Path -Name "{20D04FE0-3AEA-1069-A2D8-08002B30309D}" -Value 0 -Force
+          }
+          Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+
+      - name: Install Brave Browser
+        run: |
+          $BraveUrl = "https://laptop-updates.brave.com/latest/winx64"
+          $Installer = "$env:TEMP\BraveSetup.exe"
+          Invoke-WebRequest -Uri $BraveUrl -OutFile $Installer
+          Start-Process -FilePath $Installer -ArgumentList "/silent", "/install" -Wait
+          Remove-Item -Path $Installer -Force
+
+      - name: Install Internet Download Manager
+        run: |
+          $IdmUrl = "https://mirror2.internetdownloadmanager.com/idman642build25.exe"
+          $Installer = "$env:TEMP\idm_setup.exe"
+          Invoke-WebRequest -Uri $IdmUrl -OutFile $Installer -UserAgent "Mozilla/5.0"
+          Start-Process -FilePath $Installer -ArgumentList "/s" -Wait
+          Remove-Item -Path $Installer -Force
+
+      - name: Install and Deploy 3x-ui
+        run: |
+          $3xUiUrl = "https://github.com/MHSanaei/3x-ui/releases/download/v3.6.0/x-ui-windows-amd64.zip"
+          $ZipPath = "$env:TEMP\3x-ui.zip"
+          $ExtractPath = "C:\3x-ui"
+          
+          Invoke-WebRequest -Uri $3xUiUrl -OutFile $ZipPath
+          Expand-Archive -Path $ZipPath -DestinationPath $ExtractPath -Force
+          Remove-Item -Path $ZipPath -Force
+          
+          if (Test-Path "$ExtractPath\x-ui.exe") {
+              Start-Process -FilePath "$ExtractPath\x-ui.exe" -WorkingDirectory $ExtractPath -WindowStyle Hidden
+          }
+
+      - name: Deploy Tailscale Network
+        run: |
+          $TsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $Installer = "$env:TEMP\tailscale.msi"
+          
+          Invoke-WebRequest -Uri $TsUrl -OutFile $Installer
+          Start-Process msiexec.exe -ArgumentList "/i", $Installer, "/quiet", "/norestart" -Wait
+          Remove-Item -Path $Installer -Force
+          
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=win-server-$env:GITHUB_RUN_ID
+          
+          $TsIP = $null
+          for ($i = 0; $i -lt 12 -and -not $TsIP; $i++) {
+              Start-Sleep -Seconds 5
+              $TsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          }
+          
+          if (-not $TsIP) {
+              exit 1
+          }
+          
+          echo "TAILSCALE_IP=$TsIP" >> $env:GITHUB_ENV
+
+      - name: Verify Infrastructure and Keep Alive
+        if: always()
+        run: |
+          Clear-Host
+          Write-Host "=================================================="
+          Write-Host "         SECURE RDP SESSION ESTABLISHED          "
+          Write-Host "=================================================="
+          Write-Host " Tailscale IP : $env:TAILSCALE_IP"
+          Write-Host " RDP Port     : 3389"
+          Write-Host " Username     : $env:RDP_USER"
+          Write-Host " Password     : $env:RDP_PASS"
+          Write-Host "=================================================="
+          
+          while ($true) {
+              Start-Sleep -Seconds 3600
+          }
